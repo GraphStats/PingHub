@@ -1,4 +1,4 @@
-### **Lines You Must Update**
+## **Lines You Must Update**
 
 1. **Bot Token** – at the bottom of your file:
 
