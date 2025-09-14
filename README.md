@@ -1,13 +1,78 @@
-## Before using the code, modify the line below so that the bot works:
-<p>
-Lines 15 to 17 : <img width="221" height="49" alt="image" src="https://github.com/user-attachments/assets/8aa936f4-e2f5-453b-bd93-25c94a3b04a7" />
-</p>
-<p>
-Line : 21 : <img width="306" height="24" alt="image" src="https://github.com/user-attachments/assets/cf18e1ad-2172-44f0-8bee-3e4a2fc53f05" />
-</p>
-<p>
-Line : 299 : <img width="272" height="18" alt="image" src="https://github.com/user-attachments/assets/407e58fa-9930-4df9-a94a-bea608be8d6b" />
-</p>
-<p>
-Line : 197 : <img width="225" height="19" alt="image" src="https://github.com/user-attachments/assets/810e2e74-6a5a-46ee-8a56-709e96fd01c5" />
-</p>
+### **Lines You Must Update**
+
+1. **Bot Token** – at the bottom of your file:
+
+```js
+client.login('YOUR-BOT-TOKEN');
+```
+
+✅ Replace `'YOUR-BOT-TOKEN'` with your actual bot token from the Discord Developer Portal.
+
+---
+
+2. **Target Guild ID** – line near the top:
+
+```js
+const TARGET_GUILD_ID = 'GUILD-ID';
+```
+
+✅ Replace `'GUILD-ID'` with the ID of your Discord server (right-click the server → Copy ID).
+
+---
+
+3. **Target Channel ID** – where the bot sends embeds and role messages:
+
+```js
+const TARGET_CHANNEL_ID = 'CHANNEL-ID';
+```
+
+✅ Replace `'CHANNEL-ID'` with the channel ID for your stats/embed messages.
+
+---
+
+4. **Role ID** – the role your bot will assign/ping:
+
+```js
+const ROLE_ID = 'ROLE-ID';
+```
+
+✅ Replace `'ROLE-ID'` with the ID of the ping role.
+
+---
+
+5. **Excluded Channels** – optional, channels the bot should not ping:
+
+```js
+const EXCLUDED_CHANNELS = ['CHANNEL-ID', 'CHANNEL-ID'];
+```
+
+✅ Replace these with the IDs of any channels where the bot shouldn’t send pings.
+
+---
+
+6. **Inside `sendPingToAllChannels()`** – replace placeholder role ping:
+
+```js
+await randomChannel.send('<@&ROLE-ID>');
+```
+
+✅ Replace `'ROLE-ID'` with the same role ID you want to ping.
+
+---
+
+7. **Embed & Interval Settings** (optional tweak):
+
+```js
+const EMBED_INTERVAL_MS = 5000;
+const PING_INTERVAL_MS = 70;
+```
+
+✅ Adjust these if you want faster/slower updates.
+
+---
+
+💡 **Tips:**
+
+* Make sure your **bot has proper permissions** (Send Messages, Manage Roles).
+* Never share your **bot token** publicly.
+* Restart the bot after updating any IDs.
