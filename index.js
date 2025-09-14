@@ -194,7 +194,7 @@ async function sendBonjourToAllChannels() {
         
         if (randomChannel) {
             try {
-                await randomChannel.send('<@&1416721077526204499>');
+                await randomChannel.send('<@&ROLE-ID>');
                 pingTimestamps.push(Date.now());
                 console.log(`✅ Ping envoyé dans #${randomChannel.name}`);
             } catch (error) {
