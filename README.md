@@ -1,3 +1,5 @@
+## Please Read The [Discord TOS](https://discord.com/terms) before using this bot
+
 ## **Lines You Must Update**
 
 1. **Bot Token** – at the bottom of your file:
