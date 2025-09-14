@@ -27,7 +27,7 @@ let pingCounts = {
 };
 let pingTimestamps = [];
 let embedInterval;
-let bonjourInterval;
+let pingInterval;
 let statsMessageId = null;
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
@@ -104,7 +104,7 @@ client.once('ready', async () => {
     
     startPingTracking();
     startEmbedSending();
-    startBonjourSending();
+    startPingSending();
     
     console.log('🚀 All functions started!');
 });
@@ -170,15 +170,15 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-function startBonjourSending() {
-    console.log('⏰ "Bonjour" program started (every 2 minutes)');
+function startPingSending() {
+    console.log('⏰ Ping program started (every 2 minutes)');
     
-    sendBonjourToAllChannels();
+    sendPingToAllChannels();
     
-    bonjourInterval = setInterval(sendBonjourToAllChannels, PING_INTERVAL_MS);
+    pingInterval = setInterval(sendPingToAllChannels, PING_INTERVAL_MS);
 }
 
-async function sendBonjourToAllChannels() {
+async function sendPingToAllChannels() {
     try {
         const guild = client.guilds.cache.get(TARGET_GUILD_ID);
         if (!guild) return;
