@@ -11,7 +11,6 @@ const client = new Client({
         GatewayIntentBits.GuildMessageReactions
     ]
 });
-
 const TARGET_GUILD_ID = 'GUILD-ID';
 const TARGET_CHANNEL_ID = 'CHANNEL-ID';
 const ROLE_ID = 'ROLE-ID';
