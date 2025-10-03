@@ -12,26 +12,30 @@ const client = new Client({
     ]
 });
 
-const TARGET_GUILD_ID = 'GUILD-ID';
+const TARGET_GUILD_ID = 'YOUR-GUILD-ID';
 const TARGET_CHANNEL_ID = 'CHANNEL-ID';
 const ROLE_ID = 'ROLE-ID';
-const EMBED_INTERVAL_MS = 5000;
-const PING_INTERVAL_MS = 70;
+const EMBED_INTERVAL_MS = 120000;
+const BONJOUR_INTERVAL_MS = 70;
 
-const EXCLUDED_CHANNELS = ['CHANNEL-ID', 'CHANNEL-ID'];
+// Salons à exclure
+const EXCLUDED_CHANNELS = ['CHANNEL-ID-1', 'CHANNEL-ID-2', 'CHANNEL-ID-3', 'CHANNEL-ID-4', 'CHANNEL-ID-5', 'CHANNEL-ID-6'];
 
 let pingCounts = {
     second: 0,
     minute: 0,
     hour: 0
 };
-
 let pingTimestamps = [];
 let embedInterval;
-let pingInterval;
+let bonjourInterval;
 let statsMessageId = null;
+let isUpdatingEmbed = false;
+
+// File path for storing message IDs
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
+// Load message IDs from file
 async function loadMessages() {
     try {
         const data = await fs.readFile(MESSAGES_FILE, 'utf8');
@@ -48,6 +52,7 @@ async function loadMessages() {
     }
 }
 
+// Save message IDs to file
 async function saveMessages() {
     try {
         const data = JSON.stringify({
@@ -82,7 +87,7 @@ client.once('ready', async () => {
     
     if (!statsMessageId) {
         try {
-            const messages = await targetChannel.messages.fetch({ limit: 10 });
+            const messages = await targetChannel.messages.fetch({ limit: 50 });
             const statsMessage = messages.find(msg => 
                 msg.author.id === client.user.id && 
                 msg.embeds.length > 0 && 
@@ -95,21 +100,64 @@ client.once('ready', async () => {
                 await saveMessages();
             } else {
                 console.log('📋 No stats message found, will create a new one...');
+                await createInitialEmbed();
             }
         } catch (error) {
             console.error('❌ Error fetching messages:', error);
+            await createInitialEmbed();
+        }
+    } else {
+        try {
+            await targetChannel.messages.fetch(statsMessageId);
+            console.log('✅ Stats message verified');
+        } catch (error) {
+            console.log('❌ Stats message not found, creating new one...');
+            statsMessageId = null;
+            await createInitialEmbed();
         }
     }
     
-    sendRoleEmbed();
+    await sendRoleEmbed();
     
     startPingTracking();
     startEmbedSending();
-    startPingSending();
+    startBonjourSending();
     
     console.log('🚀 All functions started!');
 });
 
+// Function to create initial embed
+async function createInitialEmbed() {
+    try {
+        const guild = client.guilds.cache.get(TARGET_GUILD_ID);
+        if (!guild) return;
+
+        const channel = guild.channels.cache.get(TARGET_CHANNEL_ID);
+        if (!channel) return;
+
+        const embed = new EmbedBuilder()
+            .setColor(0x0099FF)
+            .setTitle('📊 Ping Statistics')
+            .setDescription('Here is the number of pings sent:')
+            .addFields(
+                { name: '🕐 Per second', value: `≈ 0 pings/s`, inline: true },
+                { name: '⏰ Per minute', value: `≈ 0 pings/min`, inline: true },
+                { name: '⏳ Per hour', value: `≈ 0 pings/h`, inline: true },
+                { name: '📈 Total', value: `0 pings (1h)`, inline: false }
+            )
+            .setTimestamp()
+            .setFooter({ text: 'Statistics updated every minute' });
+
+        const newMessage = await channel.send({ embeds: [embed] });
+        statsMessageId = newMessage.id;
+        await saveMessages();
+        console.log('✅ Initial embed created successfully!');
+    } catch (error) {
+        console.error('❌ Error creating initial embed:', error);
+    }
+}
+
+// Function to send the role assignment embed with buttons
 async function sendRoleEmbed() {
     try {
         const guild = client.guilds.cache.get(TARGET_GUILD_ID);
@@ -118,18 +166,34 @@ async function sendRoleEmbed() {
         const channel = guild.channels.cache.get(TARGET_CHANNEL_ID);
         if (!channel) return;
 
+        const messages = await channel.messages.fetch({ limit: 10 });
+        const existingRoleEmbed = messages.find(msg => 
+            msg.author.id === client.user.id && 
+            msg.embeds.length > 0 && 
+            msg.embeds[0].title === '🔔 Ping Role'
+        );
+
+        if (existingRoleEmbed) {
+            console.log('✅ Role embed already exists, skipping...');
+            return;
+        }
+
         const row = new ActionRowBuilder()
             .addComponents(
                 new ButtonBuilder()
                     .setCustomId('get_ping_role')
                     .setLabel('Get Ping Role')
-                    .setStyle(ButtonStyle.Primary)
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('remove_ping_role')
+                    .setLabel('Remove Ping Role')
+                    .setStyle(ButtonStyle.Danger)
             );
 
         const embed = new EmbedBuilder()
             .setColor(0x0099FF)
             .setTitle('🔔 Ping Role')
-            .setDescription('Click the button below to get the ping role!')
+            .setDescription('Click the buttons below to get or remove the ping role!')
             .setTimestamp();
 
         await channel.send({
@@ -143,19 +207,20 @@ async function sendRoleEmbed() {
     }
 }
 
+// Handle button interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
-    if (interaction.customId === 'get_ping_role') {
-        try {
-            const member = interaction.member;
-            const role = interaction.guild.roles.cache.get(ROLE_ID);
-            
-            if (!role) {
-                await interaction.reply({ content: '❌ The ping role does not exist!', ephemeral: true });
-                return;
-            }
-            
+    try {
+        const member = interaction.member;
+        const role = interaction.guild.roles.cache.get(ROLE_ID);
+        
+        if (!role) {
+            await interaction.reply({ content: '❌ The ping role does not exist!', ephemeral: true });
+            return;
+        }
+        
+        if (interaction.customId === 'get_ping_role') {
             if (member.roles.cache.has(ROLE_ID)) {
                 await interaction.reply({ content: '❌ You already have the ping role!', ephemeral: true });
                 return;
@@ -164,22 +229,31 @@ client.on('interactionCreate', async interaction => {
             await member.roles.add(role);
             await interaction.reply({ content: '✅ You have been given the ping role!', ephemeral: true });
             
-        } catch (error) {
-            console.error('❌ Error assigning role:', error);
-            await interaction.reply({ content: '❌ An error occurred while assigning the role!', ephemeral: true });
+        } else if (interaction.customId === 'remove_ping_role') {
+            if (!member.roles.cache.has(ROLE_ID)) {
+                await interaction.reply({ content: '❌ You don\'t have the ping role!', ephemeral: true });
+                return;
+            }
+            
+            await member.roles.remove(role);
+            await interaction.reply({ content: '✅ The ping role has been removed!', ephemeral: true });
         }
+        
+    } catch (error) {
+        console.error('❌ Error handling role interaction:', error);
+        await interaction.reply({ content: '❌ An error occurred while processing your request!', ephemeral: true });
     }
 });
 
-function startPingSending() {
-    console.log('⏰ Ping program started (every 2 minutes)');
+function startBonjourSending() {
+    console.log('⏰ "Bonjour" program started (every 2 minutes)');
     
-    sendPingToAllChannels();
+    sendBonjourToAllChannels();
     
-    pingInterval = setInterval(sendPingToAllChannels, PING_INTERVAL_MS);
+    bonjourInterval = setInterval(sendBonjourToAllChannels, BONJOUR_INTERVAL_MS);
 }
 
-async function sendPingToAllChannels() {
+async function sendBonjourToAllChannels() {
     try {
         const guild = client.guilds.cache.get(TARGET_GUILD_ID);
         if (!guild) return;
@@ -187,7 +261,7 @@ async function sendPingToAllChannels() {
         const channels = guild.channels.cache.filter(channel => 
             channel.type === ChannelType.GuildText &&
             channel.id !== TARGET_CHANNEL_ID &&
-            !EXCLUDED_CHANNELS.includes(channel.id) && 
+            !EXCLUDED_CHANNELS.includes(channel.id) &&
             channel.permissionsFor(guild.members.me).has('SendMessages')
         );
 
@@ -197,7 +271,7 @@ async function sendPingToAllChannels() {
             try {
                 await randomChannel.send('<@&ROLE-ID>');
                 pingTimestamps.push(Date.now());
-                console.log(`✅ Ping envoyé dans #${randomChannel.name}`);
+                console.log(`✅ "@everyone" envoyé dans #${randomChannel.name}`);
             } catch (error) {
                 console.error(`❌ Erreur dans #${randomChannel.name}: ${error.message}`);
             }
@@ -228,12 +302,17 @@ function startPingTracking() {
 function startEmbedSending() {
     console.log('📨 Embed sending program started (every 5 minutes)');
     
-    sendEmbed();
-    
     embedInterval = setInterval(sendEmbed, EMBED_INTERVAL_MS);
 }
 
 async function sendEmbed() {
+    if (isUpdatingEmbed) {
+        console.log('⏳ Embed update already in progress, skipping...');
+        return;
+    }
+    
+    isUpdatingEmbed = true;
+    
     try {
         console.log('🔄 Attempting to update embed...');
         
@@ -285,9 +364,29 @@ async function sendEmbed() {
         
     } catch (error) {
         console.error(`❌ Error updating embed:`, error);
+    } finally {
+        isUpdatingEmbed = false;
     }
 }
 
+// Gestion propre de l'arrêt
+process.on('SIGINT', async () => {
+    console.log('🛑 Shutting down gracefully...');
+    if (embedInterval) clearInterval(embedInterval);
+    if (bonjourInterval) clearInterval(bonjourInterval);
+    await saveMessages();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('🛑 Shutting down gracefully...');
+    if (embedInterval) clearInterval(embedInterval);
+    if (bonjourInterval) clearInterval(bonjourInterval);
+    await saveMessages();
+    process.exit(0);
+});
+
+// Error handling
 client.on('error', (error) => {
     console.error('❌ Discord client error:', error);
 });
@@ -296,7 +395,8 @@ process.on('unhandledRejection', (error) => {
     console.error('❌ Unhandled rejection:', error);
 });
 
+// Connect the bot
 console.log('🔗 Connecting bot...');
-client.login('YOUR-BOT-TOKEN').catch(error => {
+client.login('YOUR-TOKEN').catch(error => {
     console.error('❌ Connection error:', error);
 });
