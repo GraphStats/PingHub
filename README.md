@@ -66,7 +66,7 @@ await randomChannel.send('<@&ROLE-ID>');
 
 ```js
 const EMBED_INTERVAL_MS = 5000;
-const PING_INTERVAL_MS = 70;
+const PING_INTERVAL_MS = 100;
 ```
 
 ✅ Adjust these if you want faster/slower updates.
