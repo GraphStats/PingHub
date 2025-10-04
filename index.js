@@ -25,6 +25,7 @@ let pingCounts = {
     minute: 0,
     hour: 0
 };
+
 let pingTimestamps = [];
 let embedInterval;
 let bonjourInterval;
