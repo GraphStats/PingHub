@@ -51,7 +51,6 @@ async function loadMessages() {
     }
 }
 
-// Save message IDs to file
 async function saveMessages() {
     try {
         const data = JSON.stringify({
