@@ -8,7 +8,6 @@
 client.login('YOUR-BOT-TOKEN');
 ```
 
-
 ✅ Replace `'YOUR-BOT-TOKEN'` with your actual bot token from the Discord Developer Portal.
 
 ---
