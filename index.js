@@ -19,7 +19,6 @@ const EMBED_INTERVAL_MS = 120000;
 const BONJOUR_INTERVAL_MS = 100;
 
 const EXCLUDED_CHANNELS = ['CHANNEL-ID-1', 'CHANNEL-ID-2', 'CHANNEL-ID-3', 'CHANNEL-ID-4', 'CHANNEL-ID-5', 'CHANNEL-ID-6'];
-
 let pingCounts = {
     second: 0,
     minute: 0,
