@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, Collection, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -12,54 +12,169 @@ const client = new Client({
     ]
 });
 
-const TARGET_GUILD_ID = 'YOUR-GUILD-ID';
-const TARGET_CHANNEL_ID = 'CHANNEL-ID';
-const ROLE_ID = 'ROLE-ID';
-const EMBED_INTERVAL_MS = 120000;
-const BONJOUR_INTERVAL_MS = 100;
+const EMBED_INTERVAL_MS = 300000; // 5 minutes
+const PING_INTERVAL_MS = 200; // 2 minutes
 
-const EXCLUDED_CHANNELS = ['CHANNEL-ID-1', 'CHANNEL-ID-2', 'CHANNEL-ID-3', 'CHANNEL-ID-4', 'CHANNEL-ID-5', 'CHANNEL-ID-6'];
-
-let pingCounts = {
-    second: 0,
-    minute: 0,
-    hour: 0
-};
-let pingTimestamps = [];
-let embedInterval;
-let bonjourInterval;
-let statsMessageId = null;
-let isUpdatingEmbed = false;
-
-// File path for storing message IDs
+// File paths
+const SERVER_DATA_FILE = path.join(__dirname, 'serverData.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
-// Load message IDs from file
-async function loadMessages() {
+// Global variables
+let serverData = {};
+let pingCounts = {};
+let pingTimestamps = {};
+let embedIntervals = {};
+let pingIntervals = {};
+let isUpdatingEmbed = {};
+
+// Bot token
+const BOT_TOKEN = 'YOUR-TOKEN';
+
+// Load server data from file
+async function loadServerData() {
     try {
-        const data = await fs.readFile(MESSAGES_FILE, 'utf8');
-        const messages = JSON.parse(data);
-        statsMessageId = messages.statsMessageId || null;
-        console.log('✅ Messages loaded from file');
+        const data = await fs.readFile(SERVER_DATA_FILE, 'utf8');
+        serverData = JSON.parse(data);
+        console.log('✅ Server data loaded from file');
+        
+        // Initialize tracking for each server
+        for (const guildId in serverData) {
+            if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+            if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+            if (!isUpdatingEmbed[guildId]) isUpdatingEmbed[guildId] = false;
+        }
     } catch (error) {
         if (error.code === 'ENOENT') {
-            await saveMessages();
-            console.log('✅ Created new messages file');
+            // File doesn't exist, create it
+            serverData = {};
+            await saveServerData();
+            console.log('✅ Created new server data file');
         } else {
-            console.error('❌ Error loading messages:', error);
+            console.error('❌ Error loading server data:', error);
         }
     }
 }
 
-async function saveMessages() {
+// Save server data to file
+async function saveServerData() {
     try {
-        const data = JSON.stringify({
-            statsMessageId: statsMessageId
-        }, null, 2);
-        await fs.writeFile(MESSAGES_FILE, data);
-        console.log('✅ Messages saved to file');
+        const data = JSON.stringify(serverData, null, 2);
+        await fs.writeFile(SERVER_DATA_FILE, data);
+        console.log('✅ Server data saved to file');
     } catch (error) {
-        console.error('❌ Error saving messages:', error);
+        console.error('❌ Error saving server data:', error);
+    }
+}
+
+// Initialize server data if it doesn't exist
+function initServerData(guildId) {
+    if (!serverData[guildId]) {
+        serverData[guildId] = {
+            targetChannelId: null,
+            pingRoleId: null,
+            excludedChannels: [],
+            statsMessageId: null,
+            pingedEmbed: {
+                title: '🔔 Ping Role',
+                description: 'Click the buttons below to get or remove the ping role!',
+                color: 0x0099FF
+            },
+            statsEmbed: {
+                title: '📊 Ping Statistics',
+                description: 'Here is the number of pings sent:',
+                color: 0x0099FF
+            }
+        };
+        
+        // Initialize tracking
+        pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+        pingTimestamps[guildId] = [];
+        isUpdatingEmbed[guildId] = false;
+    }
+}
+
+// Command definitions
+const commands = [
+    new SlashCommandBuilder()
+        .setName('setup')
+        .setDescription('Configure the basic settings for the bot')
+        .addChannelOption(option =>
+            option.setName('channel')
+                .setDescription('The channel where stats will be displayed')
+                .setRequired(true))
+        .addRoleOption(option =>
+            option.setName('role')
+                .setDescription('The role that will be pinged')
+                .setRequired(true)),
+    
+    new SlashCommandBuilder()
+        .setName('exclude_channels')
+        .setDescription('Add or remove channels from the exclusion list')
+        .addChannelOption(option =>
+            option.setName('channel')
+                .setDescription('The channel to add/remove from exclusion list')
+                .setRequired(true)),
+    
+    new SlashCommandBuilder()
+        .setName('set_pinged_embed')
+        .setDescription('Customize the ping role assignment embed')
+        .addStringOption(option =>
+            option.setName('title')
+                .setDescription('Embed title')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('description')
+                .setDescription('Embed description')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('color')
+                .setDescription('Embed color (hex code without #)')
+                .setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('set_stats_embed')
+        .setDescription('Customize the statistics embed')
+        .addStringOption(option =>
+            option.setName('title')
+                .setDescription('Embed title')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('description')
+                .setDescription('Embed description')
+                .setRequired(false))
+        .addStringOption(option =>
+            option.setName('color')
+                .setDescription('Embed color (hex code without #)')
+                .setRequired(false)),
+    
+    new SlashCommandBuilder()
+        .setName('status')
+        .setDescription('Show current bot configuration'),
+    
+    new SlashCommandBuilder()
+        .setName('start')
+        .setDescription('Start the ping system'),
+    
+    new SlashCommandBuilder()
+        .setName('stop')
+        .setDescription('Stop the ping system')
+].map(command => command.toJSON());
+
+// Register commands
+async function registerCommands() {
+    try {
+        const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
+        
+        console.log('🔄 Registering slash commands...');
+        
+        const data = await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+        
+        console.log(`✅ Successfully registered ${data.length} slash commands globally`);
+    } catch (error) {
+        console.error('❌ Error registering commands:', error);
     }
 }
 
@@ -67,159 +182,214 @@ client.once('ready', async () => {
     console.log(`✅ Connected as ${client.user.tag}!`);
     console.log(`🆔 Bot ID: ${client.user.id}`);
     
-    await loadMessages();
+    // Load server data
+    await loadServerData();
     
-    const guild = client.guilds.cache.get(TARGET_GUILD_ID);
-    if (!guild) {
-        console.error('❌ Guild not found!');
-        return;
-    }
-    console.log(`🏰 Guild found: ${guild.name}`);
+    // Register slash commands
+    await registerCommands();
     
-    const targetChannel = guild.channels.cache.get(TARGET_CHANNEL_ID);
-    if (!targetChannel) {
-        console.error('❌ Target channel not found!');
-        return;
-    }
-    console.log(`📁 Target channel found: ${targetChannel.name}`);
+    // Initialize systems for each guild the bot is in
+    client.guilds.cache.forEach(guild => {
+        initServerData(guild.id);
+        startSystems(guild.id);
+    });
     
-    if (!statsMessageId) {
-        try {
-            const messages = await targetChannel.messages.fetch({ limit: 50 });
-            const statsMessage = messages.find(msg => 
-                msg.author.id === client.user.id && 
-                msg.embeds.length > 0 && 
-                msg.embeds[0].title === '📊 Ping Statistics'
-            );
-            
-            if (statsMessage) {
-                statsMessageId = statsMessage.id;
-                console.log(`📋 Stats message found: ${statsMessageId}`);
-                await saveMessages();
-            } else {
-                console.log('📋 No stats message found, will create a new one...');
-                await createInitialEmbed();
-            }
-        } catch (error) {
-            console.error('❌ Error fetching messages:', error);
-            await createInitialEmbed();
-        }
-    } else {
-        try {
-            await targetChannel.messages.fetch(statsMessageId);
-            console.log('✅ Stats message verified');
-        } catch (error) {
-            console.log('❌ Stats message not found, creating new one...');
-            statsMessageId = null;
-            await createInitialEmbed();
-        }
-    }
-    
-    await sendRoleEmbed();
-    
-    startPingTracking();
-    startEmbedSending();
-    startBonjourSending();
-    
-    console.log('🚀 All functions started!');
+    console.log('🚀 All systems initialized!');
 });
 
-// Function to create initial embed
-async function createInitialEmbed() {
-    try {
-        const guild = client.guilds.cache.get(TARGET_GUILD_ID);
-        if (!guild) return;
-
-        const channel = guild.channels.cache.get(TARGET_CHANNEL_ID);
-        if (!channel) return;
-
-        const embed = new EmbedBuilder()
-            .setColor(0x0099FF)
-            .setTitle('📊 Ping Statistics')
-            .setDescription('Here is the number of pings sent:')
-            .addFields(
-                { name: '🕐 Per second', value: `≈ 0 pings/s`, inline: true },
-                { name: '⏰ Per minute', value: `≈ 0 pings/min`, inline: true },
-                { name: '⏳ Per hour', value: `≈ 0 pings/h`, inline: true },
-                { name: '📈 Total', value: `0 pings (1h)`, inline: false }
-            )
-            .setTimestamp()
-            .setFooter({ text: 'Statistics updated every minute' });
-
-        const newMessage = await channel.send({ embeds: [embed] });
-        statsMessageId = newMessage.id;
-        await saveMessages();
-        console.log('✅ Initial embed created successfully!');
-    } catch (error) {
-        console.error('❌ Error creating initial embed:', error);
+// Start systems for a specific guild
+function startSystems(guildId) {
+    const guildData = serverData[guildId];
+    if (!guildData || !guildData.targetChannelId || !guildData.pingRoleId) {
+        console.log(`⏸️  Systems not started for guild ${guildId} - missing configuration`);
+        return;
     }
+    
+    // Start ping tracking
+    startPingTracking(guildId);
+    
+    // Start embed updates
+    startEmbedSending(guildId);
+    
+    // Start ping sending
+    startPingSending(guildId);
+    
+    // Send role embed
+    sendRoleEmbed(guildId);
+    
+    console.log(`🚀 Systems started for guild ${guildId}`);
 }
 
-// Function to send the role assignment embed with buttons
-async function sendRoleEmbed() {
+// Stop systems for a specific guild
+function stopSystems(guildId) {
+    if (embedIntervals[guildId]) {
+        clearInterval(embedIntervals[guildId]);
+        delete embedIntervals[guildId];
+    }
+    
+    if (pingIntervals[guildId]) {
+        clearInterval(pingIntervals[guildId]);
+        delete pingIntervals[guildId];
+    }
+    
+    console.log(`🛑 Systems stopped for guild ${guildId}`);
+}
+
+// Handle slash commands
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    
+    const { commandName, guild, options } = interaction;
+    const guildId = guild.id;
+    
+    // Initialize server data if needed
+    initServerData(guildId);
+    
     try {
-        const guild = client.guilds.cache.get(TARGET_GUILD_ID);
-        if (!guild) return;
-
-        const channel = guild.channels.cache.get(TARGET_CHANNEL_ID);
-        if (!channel) return;
-
-        const messages = await channel.messages.fetch({ limit: 10 });
-        const existingRoleEmbed = messages.find(msg => 
-            msg.author.id === client.user.id && 
-            msg.embeds.length > 0 && 
-            msg.embeds[0].title === '🔔 Ping Role'
-        );
-
-        if (existingRoleEmbed) {
-            console.log('✅ Role embed already exists, skipping...');
-            return;
+        switch (commandName) {
+            case 'setup':
+                const channel = options.getChannel('channel');
+                const role = options.getRole('role');
+                
+                serverData[guildId].targetChannelId = channel.id;
+                serverData[guildId].pingRoleId = role.id;
+                
+                await saveServerData();
+                
+                // Stop existing systems and restart with new config
+                stopSystems(guildId);
+                startSystems(guildId);
+                
+                await interaction.reply({ 
+                    content: `✅ Configuration updated!\n📊 Stats channel: ${channel}\n🔔 Ping role: ${role}`,
+                    ephemeral: true 
+                });
+                break;
+                
+            case 'exclude_channels':
+                const targetChannel = options.getChannel('channel');
+                const excludedChannels = serverData[guildId].excludedChannels || [];
+                
+                if (excludedChannels.includes(targetChannel.id)) {
+                    // Remove from exclusion list
+                    serverData[guildId].excludedChannels = excludedChannels.filter(id => id !== targetChannel.id);
+                    await saveServerData();
+                    await interaction.reply({ 
+                        content: `✅ Channel ${targetChannel} removed from exclusion list`,
+                        ephemeral: true 
+                    });
+                } else {
+                    // Add to exclusion list
+                    serverData[guildId].excludedChannels.push(targetChannel.id);
+                    await saveServerData();
+                    await interaction.reply({ 
+                        content: `✅ Channel ${targetChannel} added to exclusion list`,
+                        ephemeral: true 
+                    });
+                }
+                break;
+                
+            case 'set_pinged_embed':
+                const pingedTitle = options.getString('title');
+                const pingedDescription = options.getString('description');
+                const pingedColor = options.getString('color');
+                
+                if (pingedTitle) serverData[guildId].pingedEmbed.title = pingedTitle;
+                if (pingedDescription) serverData[guildId].pingedEmbed.description = pingedDescription;
+                if (pingedColor) serverData[guildId].pingedEmbed.color = parseInt(pingedColor, 16);
+                
+                await saveServerData();
+                
+                // Update the existing embed
+                await sendRoleEmbed(guildId);
+                
+                await interaction.reply({ 
+                    content: '✅ Ping role embed updated!',
+                    ephemeral: true 
+                });
+                break;
+                
+            case 'set_stats_embed':
+                const statsTitle = options.getString('title');
+                const statsDescription = options.getString('description');
+                const statsColor = options.getString('color');
+                
+                if (statsTitle) serverData[guildId].statsEmbed.title = statsTitle;
+                if (statsDescription) serverData[guildId].statsEmbed.description = statsDescription;
+                if (statsColor) serverData[guildId].statsEmbed.color = parseInt(statsColor, 16);
+                
+                await saveServerData();
+                
+                await interaction.reply({ 
+                    content: '✅ Statistics embed updated!',
+                    ephemeral: true 
+                });
+                break;
+                
+            case 'status':
+                const config = serverData[guildId];
+                const statusEmbed = new EmbedBuilder()
+                    .setTitle('🤖 Bot Configuration')
+                    .setColor(0x00FF00)
+                    .addFields(
+                        { name: '📊 Stats Channel', value: config.targetChannelId ? `<#${config.targetChannelId}>` : 'Not set', inline: true },
+                        { name: '🔔 Ping Role', value: config.pingRoleId ? `<@&${config.pingRoleId}>` : 'Not set', inline: true },
+                        { name: '🚫 Excluded Channels', value: config.excludedChannels.length > 0 ? config.excludedChannels.map(id => `<#${id}>`).join(', ') : 'None', inline: false },
+                        { name: '📈 Systems Status', value: embedIntervals[guildId] ? '🟢 Running' : '🔴 Stopped', inline: true }
+                    )
+                    .setTimestamp();
+                
+                await interaction.reply({ embeds: [statusEmbed], ephemeral: true });
+                break;
+                
+            case 'start':
+                startSystems(guildId);
+                await interaction.reply({ 
+                    content: '✅ Ping system started!',
+                    ephemeral: true 
+                });
+                break;
+                
+            case 'stop':
+                stopSystems(guildId);
+                await interaction.reply({ 
+                    content: '🛑 Ping system stopped!',
+                    ephemeral: true 
+                });
+                break;
         }
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('get_ping_role')
-                    .setLabel('Get Ping Role')
-                    .setStyle(ButtonStyle.Primary),
-                new ButtonBuilder()
-                    .setCustomId('remove_ping_role')
-                    .setLabel('Remove Ping Role')
-                    .setStyle(ButtonStyle.Danger)
-            );
-
-        const embed = new EmbedBuilder()
-            .setColor(0x0099FF)
-            .setTitle('🔔 Ping Role')
-            .setDescription('Click the buttons below to get or remove the ping role!')
-            .setTimestamp();
-
-        await channel.send({
-            embeds: [embed],
-            components: [row]
-        });
-        
-        console.log('✅ Role assignment embed sent');
     } catch (error) {
-        console.error('❌ Error sending role embed:', error);
+        console.error(`❌ Error handling command ${commandName}:`, error);
+        await interaction.reply({ 
+            content: '❌ An error occurred while processing your command!',
+            ephemeral: true 
+        });
     }
-}
+});
 
-// Handle button interactions
+// Handle button interactions for role assignment
 client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     
     try {
-        const member = interaction.member;
-        const role = interaction.guild.roles.cache.get(ROLE_ID);
+        const { guild, member, customId } = interaction;
+        const guildId = guild.id;
+        const guildData = serverData[guildId];
+        
+        if (!guildData || !guildData.pingRoleId) {
+            await interaction.reply({ content: '❌ The ping role is not configured!', ephemeral: true });
+            return;
+        }
+        
+        const role = guild.roles.cache.get(guildData.pingRoleId);
         
         if (!role) {
             await interaction.reply({ content: '❌ The ping role does not exist!', ephemeral: true });
             return;
         }
         
-        if (interaction.customId === 'get_ping_role') {
-            if (member.roles.cache.has(ROLE_ID)) {
+        if (customId === 'get_ping_role') {
+            if (member.roles.cache.has(guildData.pingRoleId)) {
                 await interaction.reply({ content: '❌ You already have the ping role!', ephemeral: true });
                 return;
             }
@@ -227,8 +397,8 @@ client.on('interactionCreate', async interaction => {
             await member.roles.add(role);
             await interaction.reply({ content: '✅ You have been given the ping role!', ephemeral: true });
             
-        } else if (interaction.customId === 'remove_ping_role') {
-            if (!member.roles.cache.has(ROLE_ID)) {
+        } else if (customId === 'remove_ping_role') {
+            if (!member.roles.cache.has(guildData.pingRoleId)) {
                 await interaction.reply({ content: '❌ You don\'t have the ping role!', ephemeral: true });
                 return;
             }
@@ -243,23 +413,72 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-function startBonjourSending() {
-    console.log('⏰ "Bonjour" program started (every 2 minutes)');
-    
-    sendBonjourToAllChannels();
-    
-    bonjourInterval = setInterval(sendBonjourToAllChannels, BONJOUR_INTERVAL_MS);
+// Function to send role assignment embed
+async function sendRoleEmbed(guildId) {
+    try {
+        const guildData = serverData[guildId];
+        if (!guildData || !guildData.targetChannelId) return;
+
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) return;
+
+        const channel = guild.channels.cache.get(guildData.targetChannelId);
+        if (!channel) return;
+
+        // Create buttons
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('get_ping_role')
+                    .setLabel('Get Ping Role')
+                    .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                    .setCustomId('remove_ping_role')
+                    .setLabel('Remove Ping Role')
+                    .setStyle(ButtonStyle.Danger)
+            );
+
+        // Create embed from configuration
+        const embed = new EmbedBuilder()
+            .setColor(guildData.pingedEmbed.color)
+            .setTitle(guildData.pingedEmbed.title)
+            .setDescription(guildData.pingedEmbed.description)
+            .setTimestamp();
+
+        // Send the embed with buttons
+        await channel.send({
+            embeds: [embed],
+            components: [row]
+        });
+        
+        console.log(`✅ Role assignment embed sent for guild ${guildId}`);
+    } catch (error) {
+        console.error(`❌ Error sending role embed for guild ${guildId}:`, error);
+    }
 }
 
-async function sendBonjourToAllChannels() {
+function startPingSending(guildId) {
+    console.log(`⏰ Ping program started for guild ${guildId} (every 2 minutes)`);
+    
+    // Send immediately
+    sendPingToAllChannels(guildId);
+    
+    // Then set interval
+    pingIntervals[guildId] = setInterval(() => sendPingToAllChannels(guildId), PING_INTERVAL_MS);
+}
+
+async function sendPingToAllChannels(guildId) {
     try {
-        const guild = client.guilds.cache.get(TARGET_GUILD_ID);
+        const guildData = serverData[guildId];
+        if (!guildData || !guildData.pingRoleId) return;
+
+        const guild = client.guilds.cache.get(guildId);
         if (!guild) return;
 
         const channels = guild.channels.cache.filter(channel => 
             channel.type === ChannelType.GuildText &&
-            channel.id !== TARGET_CHANNEL_ID &&
-            !EXCLUDED_CHANNELS.includes(channel.id) &&
+            channel.id !== guildData.targetChannelId &&
+            !guildData.excludedChannels.includes(channel.id) &&
             channel.permissionsFor(guild.members.me).has('SendMessages')
         );
 
@@ -267,120 +486,124 @@ async function sendBonjourToAllChannels() {
         
         if (randomChannel) {
             try {
-                await randomChannel.send('<@&ROLE-ID>');
-                pingTimestamps.push(Date.now());
-                console.log(`✅ "@everyone" envoyé dans #${randomChannel.name}`);
+                await randomChannel.send(`<@&${guildData.pingRoleId}>`);
+                if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+                pingTimestamps[guildId].push(Date.now());
+                console.log(`✅ Ping envoyé dans #${randomChannel.name} (guild: ${guildId})`);
             } catch (error) {
                 console.error(`❌ Erreur dans #${randomChannel.name}: ${error.message}`);
             }
         }
         
     } catch (error) {
-        console.error(`❌ Erreur générale: ${error.message}`);
+        console.error(`❌ Erreur générale pour guild ${guildId}: ${error.message}`);
     }
 }
 
-function startPingTracking() {
-    console.log('📊 Ping tracking started');
+function startPingTracking(guildId) {
+    console.log(`📊 Ping tracking started for guild ${guildId}`);
     
     setInterval(() => {
-        pingCounts.second = pingTimestamps.filter(ts => Date.now() - ts < 1000).length;
+        if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+        if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+        pingCounts[guildId].second = pingTimestamps[guildId].filter(ts => Date.now() - ts < 1000).length;
     }, 1000);
     
     setInterval(() => {
-        pingCounts.minute = pingTimestamps.filter(ts => Date.now() - ts < 60000).length;
+        if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+        if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+        pingCounts[guildId].minute = pingTimestamps[guildId].filter(ts => Date.now() - ts < 60000).length;
     }, 1000);
     
     setInterval(() => {
-        pingCounts.hour = pingTimestamps.filter(ts => Date.now() - ts < 3600000).length;
-        pingTimestamps = pingTimestamps.filter(ts => Date.now() - ts < 3600000);
+        if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+        if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+        pingCounts[guildId].hour = pingTimestamps[guildId].filter(ts => Date.now() - ts < 3600000).length;
+        pingTimestamps[guildId] = pingTimestamps[guildId].filter(ts => Date.now() - ts < 3600000);
     }, 3600000);
 }
 
-function startEmbedSending() {
-    console.log('📨 Embed sending program started (every 5 minutes)');
+function startEmbedSending(guildId) {
+    console.log(`📨 Embed sending program started for guild ${guildId} (every 5 minutes)`);
     
-    embedInterval = setInterval(sendEmbed, EMBED_INTERVAL_MS);
+    embedIntervals[guildId] = setInterval(() => sendEmbed(guildId), EMBED_INTERVAL_MS);
 }
 
-async function sendEmbed() {
-    if (isUpdatingEmbed) {
-        console.log('⏳ Embed update already in progress, skipping...');
+async function sendEmbed(guildId) {
+    if (isUpdatingEmbed[guildId]) {
+        console.log(`⏳ Embed update already in progress for guild ${guildId}, skipping...`);
         return;
     }
     
-    isUpdatingEmbed = true;
+    isUpdatingEmbed[guildId] = true;
     
     try {
-        console.log('🔄 Attempting to update embed...');
-        
-        const guild = client.guilds.cache.get(TARGET_GUILD_ID);
-        if (!guild) {
-            console.error('❌ Guild not found for embed');
-            return;
-        }
+        const guildData = serverData[guildId];
+        if (!guildData || !guildData.targetChannelId) return;
 
-        const channel = guild.channels.cache.get(TARGET_CHANNEL_ID);
-        if (!channel) {
-            console.error('❌ Channel not found for embed');
-            return;
-        }
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) return;
 
-        console.log('✅ All checks OK');
-        
+        const channel = guild.channels.cache.get(guildData.targetChannelId);
+        if (!channel) return;
+
+        // Initialize tracking if needed
+        if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
+        if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
+
         const embed = new EmbedBuilder()
-            .setColor(0x0099FF)
-            .setTitle('📊 Ping Statistics')
-            .setDescription('Here is the number of pings sent:')
+            .setColor(guildData.statsEmbed.color)
+            .setTitle(guildData.statsEmbed.title)
+            .setDescription(guildData.statsEmbed.description)
             .addFields(
-                { name: '🕐 Per second', value: `≈ ${pingCounts.second} pings/s`, inline: true },
-                { name: '⏰ Per minute', value: `≈ ${pingCounts.minute} pings/min`, inline: true },
-                { name: '⏳ Per hour', value: `≈ ${pingCounts.hour} pings/h`, inline: true },
-                { name: '📈 Total', value: `${pingTimestamps.length} pings (1h)`, inline: false }
+                { name: '🕐 Per second', value: `≈ ${pingCounts[guildId].second} pings/s`, inline: true },
+                { name: '⏰ Per minute', value: `≈ ${pingCounts[guildId].minute} pings/min`, inline: true },
+                { name: '⏳ Per hour', value: `≈ ${pingCounts[guildId].hour} pings/h`, inline: true },
+                { name: '📈 Total', value: `${pingTimestamps[guildId].length} pings (1h)`, inline: false }
             )
             .setTimestamp()
             .setFooter({ text: 'Statistics updated every minute' });
 
-        console.log('📋 Embed created, updating...');
-        
-        if (statsMessageId) {
-            try {
-                const message = await channel.messages.fetch(statsMessageId);
-                await message.edit({ embeds: [embed] });
-                console.log('✅ Embed updated successfully!');
-                return;
-            } catch (error) {
-                console.log('❌ Cannot edit message, creating a new one...');
-                statsMessageId = null;
-            }
-        }
-        
-        const newMessage = await channel.send({ embeds: [embed] });
-        statsMessageId = newMessage.id;
-        await saveMessages();
-        console.log('✅ New embed sent successfully!');
+        await channel.send({ embeds: [embed] });
+        console.log(`✅ Stats embed sent for guild ${guildId}`);
         
     } catch (error) {
-        console.error(`❌ Error updating embed:`, error);
+        console.error(`❌ Error sending embed for guild ${guildId}:`, error);
     } finally {
-        isUpdatingEmbed = false;
+        isUpdatingEmbed[guildId] = false;
     }
 }
 
-// Gestion propre de l'arrêt
+// Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    if (embedInterval) clearInterval(embedInterval);
-    if (bonjourInterval) clearInterval(bonjourInterval);
-    await saveMessages();
+    console.log('🛑 Shutting down bot...');
+    
+    // Stop all intervals
+    for (const guildId in embedIntervals) {
+        clearInterval(embedIntervals[guildId]);
+    }
+    for (const guildId in pingIntervals) {
+        clearInterval(pingIntervals[guildId]);
+    }
+    
+    await saveServerData();
+    client.destroy();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-    console.log('🛑 Shutting down gracefully...');
-    if (embedInterval) clearInterval(embedInterval);
-    if (bonjourInterval) clearInterval(bonjourInterval);
-    await saveMessages();
+    console.log('🛑 Shutting down bot...');
+    
+    // Stop all intervals
+    for (const guildId in embedIntervals) {
+        clearInterval(embedIntervals[guildId]);
+    }
+    for (const guildId in pingIntervals) {
+        clearInterval(pingIntervals[guildId]);
+    }
+    
+    await saveServerData();
+    client.destroy();
     process.exit(0);
 });
 
@@ -395,6 +618,6 @@ process.on('unhandledRejection', (error) => {
 
 // Connect the bot
 console.log('🔗 Connecting bot...');
-client.login('YOUR-TOKEN').catch(error => {
+client.login(BOT_TOKEN).catch(error => {
     console.error('❌ Connection error:', error);
 });
