@@ -132,22 +132,6 @@ const commands = [
                 .setRequired(false)),
     
     new SlashCommandBuilder()
-        .setName('set_stats_embed')
-        .setDescription('Customize the statistics embed')
-        .addStringOption(option =>
-            option.setName('title')
-                .setDescription('Embed title')
-                .setRequired(false))
-        .addStringOption(option =>
-            option.setName('description')
-                .setDescription('Embed description')
-                .setRequired(false))
-        .addStringOption(option =>
-            option.setName('color')
-                .setDescription('Embed color (hex code without #)')
-                .setRequired(false)),
-    
-    new SlashCommandBuilder()
         .setName('status')
         .setDescription('Show current bot configuration'),
     
@@ -207,9 +191,6 @@ function startSystems(guildId) {
     
     // Start ping tracking
     startPingTracking(guildId);
-    
-    // Start embed updates
-    startEmbedSending(guildId);
     
     // Start ping sending
     startPingSending(guildId);
@@ -309,23 +290,6 @@ client.on('interactionCreate', async interaction => {
                 });
                 break;
                 
-            case 'set_stats_embed':
-                const statsTitle = options.getString('title');
-                const statsDescription = options.getString('description');
-                const statsColor = options.getString('color');
-                
-                if (statsTitle) serverData[guildId].statsEmbed.title = statsTitle;
-                if (statsDescription) serverData[guildId].statsEmbed.description = statsDescription;
-                if (statsColor) serverData[guildId].statsEmbed.color = parseInt(statsColor, 16);
-                
-                await saveServerData();
-                
-                await interaction.reply({ 
-                    content: '✅ Statistics embed updated!',
-                    ephemeral: true 
-                });
-                break;
-                
             case 'status':
                 const config = serverData[guildId];
                 const statusEmbed = new EmbedBuilder()
@@ -335,7 +299,7 @@ client.on('interactionCreate', async interaction => {
                         { name: '📊 Stats Channel', value: config.targetChannelId ? `<#${config.targetChannelId}>` : 'Not set', inline: true },
                         { name: '🔔 Ping Role', value: config.pingRoleId ? `<@&${config.pingRoleId}>` : 'Not set', inline: true },
                         { name: '🚫 Excluded Channels', value: config.excludedChannels.length > 0 ? config.excludedChannels.map(id => `<#${id}>`).join(', ') : 'None', inline: false },
-                        { name: '📈 Systems Status', value: embedIntervals[guildId] ? '🟢 Running' : '🔴 Stopped', inline: true }
+                        { name: '📈 Systems Status', value: pingIntervals[guildId] ? '🟢 Running' : '🔴 Stopped', inline: true }
                     )
                     .setTimestamp();
                 
@@ -521,57 +485,6 @@ function startPingTracking(guildId) {
         pingCounts[guildId].hour = pingTimestamps[guildId].filter(ts => Date.now() - ts < 3600000).length;
         pingTimestamps[guildId] = pingTimestamps[guildId].filter(ts => Date.now() - ts < 3600000);
     }, 3600000);
-}
-
-function startEmbedSending(guildId) {
-    console.log(`📨 Embed sending program started for guild ${guildId} (every 5 minutes)`);
-    
-    embedIntervals[guildId] = setInterval(() => sendEmbed(guildId), EMBED_INTERVAL_MS);
-}
-
-async function sendEmbed(guildId) {
-    if (isUpdatingEmbed[guildId]) {
-        console.log(`⏳ Embed update already in progress for guild ${guildId}, skipping...`);
-        return;
-    }
-    
-    isUpdatingEmbed[guildId] = true;
-    
-    try {
-        const guildData = serverData[guildId];
-        if (!guildData || !guildData.targetChannelId) return;
-
-        const guild = client.guilds.cache.get(guildId);
-        if (!guild) return;
-
-        const channel = guild.channels.cache.get(guildData.targetChannelId);
-        if (!channel) return;
-
-        // Initialize tracking if needed
-        if (!pingCounts[guildId]) pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
-        if (!pingTimestamps[guildId]) pingTimestamps[guildId] = [];
-
-        const embed = new EmbedBuilder()
-            .setColor(guildData.statsEmbed.color)
-            .setTitle(guildData.statsEmbed.title)
-            .setDescription(guildData.statsEmbed.description)
-            .addFields(
-                { name: '🕐 Per second', value: `≈ ${pingCounts[guildId].second} pings/s`, inline: true },
-                { name: '⏰ Per minute', value: `≈ ${pingCounts[guildId].minute} pings/min`, inline: true },
-                { name: '⏳ Per hour', value: `≈ ${pingCounts[guildId].hour} pings/h`, inline: true },
-                { name: '📈 Total', value: `${pingTimestamps[guildId].length} pings (1h)`, inline: false }
-            )
-            .setTimestamp()
-            .setFooter({ text: 'Statistics updated every minute' });
-
-        await channel.send({ embeds: [embed] });
-        console.log(`✅ Stats embed sent for guild ${guildId}`);
-        
-    } catch (error) {
-        console.error(`❌ Error sending embed for guild ${guildId}:`, error);
-    } finally {
-        isUpdatingEmbed[guildId] = false;
-    }
 }
 
 // Graceful shutdown
