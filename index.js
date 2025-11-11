@@ -55,7 +55,6 @@ async function loadServerData() {
     }
 }
 
-// Save server data to file
 async function saveServerData() {
     try {
         const data = JSON.stringify(serverData, null, 2);
@@ -66,7 +65,6 @@ async function saveServerData() {
     }
 }
 
-// Initialize server data if it doesn't exist
 function initServerData(guildId) {
     if (!serverData[guildId]) {
         serverData[guildId] = {
@@ -86,14 +84,12 @@ function initServerData(guildId) {
             }
         };
         
-        // Initialize tracking
         pingCounts[guildId] = { second: 0, minute: 0, hour: 0 };
         pingTimestamps[guildId] = [];
         isUpdatingEmbed[guildId] = false;
     }
 }
 
-// Command definitions
 const commands = [
     new SlashCommandBuilder()
         .setName('setup')
