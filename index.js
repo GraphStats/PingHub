@@ -12,14 +12,12 @@ const client = new Client({
     ]
 });
 
-const EMBED_INTERVAL_MS = 300000; // 5 minutes
-const PING_INTERVAL_MS = 200; // 2 minutes
+const EMBED_INTERVAL_MS = 300000;
+const PING_INTERVAL_MS = 200;
 
-// File paths
 const SERVER_DATA_FILE = path.join(__dirname, 'serverData.json');
 const MESSAGES_FILE = path.join(__dirname, 'messages.json');
 
-// Global variables
 let serverData = {};
 let pingCounts = {};
 let pingTimestamps = {};
