@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, EmbedBuilder, ChannelType, ActionRowBuilder, 
 const fs = require('fs').promises;
 const path = require('path');
 
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
