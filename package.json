@@ -1,4 +1,24 @@
 {
+  "name": "pinghub",
+  "version": "2.0.0",
+  "description": "Optimized Discord bot for low-resource servers",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --max-old-space-size=256 index.js",
+    "start:gc": "node --expose-gc --max-old-space-size=256 index.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "ping",
+    "optimized",
+    "low-resource"
+  ],
+  "author": "",
+  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.22.1"
   }
